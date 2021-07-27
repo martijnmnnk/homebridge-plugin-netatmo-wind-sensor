@@ -14,27 +14,27 @@ let hap: HAP;
 
 export = (api: API) => {
   hap = api.hap;
-  api.registerAccessory('homebridge-plugin-netatmo-rain-sensor', VirtualRainSensorPlugin);
+  api.registerAccessory('homebridge-plugin-netatmo-wind-sensor', VirtualWindSensorPlugin);
 };
 
-enum VirtualRainSensorDeviceType {
+enum VirtualWindSensorDeviceType {
   Switch,
   Leak
 }
 
-class VirtualRainSensorPlugin implements AccessoryPlugin {
+class VirtualWindSensorPlugin implements AccessoryPlugin {
   private readonly logging: Logging;
-  private readonly virtualRainSensorService: Service;
+  private readonly virtualWindSensorService: Service;
   private readonly accessoryInformationService: Service;
-  private readonly deviceType: VirtualRainSensorDeviceType;
+  private readonly deviceType: VirtualWindSensorDeviceType;
   private readonly pollingIntervalInSec: number;
   private readonly slidingWindowSizeInMinutes: number;
   private readonly reauthenticationIntervalInMs: number;
   private readonly cooldownIntervalInMinutes: number;
   private netatmoApi: netatmo;
   private netatmoStationId?: string;
-  private netatmoRainSensorId?: string;
-  private rainDetected: boolean;
+  private netatmoWindSensorId?: string;
+  private windDetected: boolean;
   private readonly accessoryConfig: AccessoryConfig;
   private IsInCooldown: boolean;
 
@@ -42,13 +42,14 @@ class VirtualRainSensorPlugin implements AccessoryPlugin {
     this.logging = logging;
     this.accessoryConfig = accessoryConfig;
     this.netatmoStationId = undefined;
-    this.netatmoRainSensorId = undefined;
-    this.rainDetected = false;
+    this.netatmoWindSensorId = undefined;
+    this.windDetected = false;
     this.deviceType = this.initializeDeviceType(accessoryConfig.deviceType);
-    this.virtualRainSensorService = this.createAndConfigureService(this.deviceType);
+    this.virtualWindSensorService = this.createAndConfigureService(this.deviceType);
     this.pollingIntervalInSec = accessoryConfig.pollingInterval;
     this.slidingWindowSizeInMinutes = accessoryConfig.slidingWindowSize;
     this.cooldownIntervalInMinutes = accessoryConfig.cooldownInterval;
+    this.minimumSpeed = accessoryConfig.minimumSpeed;
     this.IsInCooldown = false;
 
     // Reauthenticate Netatmo API every 24 hours
@@ -57,62 +58,62 @@ class VirtualRainSensorPlugin implements AccessoryPlugin {
     // Create a new Accessory Information Service
     this.accessoryInformationService = new hap.Service.AccessoryInformation()
       .setCharacteristic(hap.Characteristic.Manufacturer, 'Patrick Bär')
-      .setCharacteristic(hap.Characteristic.Model, 'Virtual Device for Netatmo Rain Sensor');
+      .setCharacteristic(hap.Characteristic.Model, 'Virtual Device for Netatmo Wind Sensor');
 
     this.logging.info('Authenticating with the Netatmo API and configuring callbacks.');
     this.netatmoApi = this.authenticateAndConfigureNetatmoApi(accessoryConfig);
 
-    this.logging.info('Looking for Netatmo Rain Sensor and setting up polling schedule.');
+    this.logging.info('Looking for Netatmo Wind Sensor and setting up polling schedule.');
     this.netatmoApi.getStationsData();
   }
 
-  createAndConfigureService(deviceType: VirtualRainSensorDeviceType): Service {
-    let localVirtualRainSensorService: Service;
+  createAndConfigureService(deviceType: VirtualWindSensorDeviceType): Service {
+    let localVirtualWindSensorService: Service;
 
-    if(deviceType === VirtualRainSensorDeviceType.Switch) {
+    if(deviceType === VirtualWindSensorDeviceType.Switch) {
       // Create a new Switch Sensor Service
-      localVirtualRainSensorService = new hap.Service.Switch(this.accessoryConfig.name);
+      localVirtualWindSensorService = new hap.Service.Switch(this.accessoryConfig.name);
 
-      // Create handler for rain detection
-      localVirtualRainSensorService.getCharacteristic(hap.Characteristic.On)
+      // Create handler for wind detection
+      localVirtualWindSensorService.getCharacteristic(hap.Characteristic.On)
         .onGet(this.handleSwitchOnGet.bind(this));
-      localVirtualRainSensorService.getCharacteristic(hap.Characteristic.On)
+      localVirtualWindSensorService.getCharacteristic(hap.Characteristic.On)
         .onSet(this.handleSwitchOnSet.bind(this));
 
-      this.logging.info('Exposing the Netatmo Rain Sensor as a Switch.');
+      this.logging.info('Exposing the Netatmo Wind Sensor as a Switch.');
     } else {
       // Create a new Leak Sensor Service
-      localVirtualRainSensorService = new hap.Service.LeakSensor(this.accessoryConfig.name);
+      localVirtualWindSensorService = new hap.Service.LeakSensor(this.accessoryConfig.name);
 
       // Create handler for leak detection
-      localVirtualRainSensorService.getCharacteristic(hap.Characteristic.LeakDetected)
+      localVirtualWindSensorService.getCharacteristic(hap.Characteristic.LeakDetected)
         .onGet(this.handleLeakDetectedGet.bind(this));
 
-      this.logging.info('Exposing the Netatmo Rain Sensor as a Leak Sensor.');
+      this.logging.info('Exposing the Netatmo Wind Sensor as a Leak Sensor.');
     }
 
-    return localVirtualRainSensorService;
+    return localVirtualWindSensorService;
   }
 
-  initializeDeviceType(deviceTypeAsString: string): VirtualRainSensorDeviceType {
+  initializeDeviceType(deviceTypeAsString: string): VirtualWindSensorDeviceType {
     if(!deviceTypeAsString || deviceTypeAsString === '' || deviceTypeAsString === 'Switch') {
-      return VirtualRainSensorDeviceType.Switch;
+      return VirtualWindSensorDeviceType.Switch;
     } else {
-      return VirtualRainSensorDeviceType.Leak;
+      return VirtualWindSensorDeviceType.Leak;
     }
   }
 
   getDevices(_error, devices): void {
     devices.forEach(device => {
       device.modules.forEach(module => {
-        if(module.type === 'NAModule3') {
-          this.logging.info(`Found first Netatmo Rain Sensor named "${module.module_name}". Using this Rain Sensor.`);
+        if(module.type === 'NAModule2') {
+          this.logging.info(`Found first Netatmo Wind Sensor named "${module.module_name}". Using this Wind Sensor.`);
           this.netatmoStationId = device._id;
-          this.netatmoRainSensorId = module._id;
+          this.netatmoWindSensorId = module._id;
         }
       });
     });
-    if(this.netatmoRainSensorId !== undefined) {
+    if(this.netatmoWindSensorId !== undefined) {
       // Create recurring timer for Netatmo API reauthentication
       setInterval(this.forceReauthenticationOfNetatmoApi.bind(this), this.reauthenticationIntervalInMs);
 
@@ -122,7 +123,7 @@ class VirtualRainSensorPlugin implements AccessoryPlugin {
       setInterval(this.pollNetatmoApi.bind(this), pollingIntervalInMs);
       this.pollNetatmoApi();
     } else {
-      this.logging.error('No Netatmo Rain Sensor found.');
+      this.logging.error('No Netatmo Wind Sensor found.');
     }
   }
 
@@ -130,22 +131,22 @@ class VirtualRainSensorPlugin implements AccessoryPlugin {
     this.logging.debug(`Native output of measures: ${JSON.stringify(measures)}.`);
 
     if(this.IsInCooldown) {
-      this.logging.debug('Cooldown detected. Skipping this rain detection cycle.');
+      this.logging.debug('Cooldown detected. Skipping this wind detection cycle.');
     } else {
-      this.rainDetected = false;
+      this.windDetected = false;
 
       measures.forEach(measure => {
         measure.value.forEach(measuredValue => {
-          if(measuredValue > 0) {
-            this.rainDetected = true;
+          if (measuredValue > this.minimumSpeed) {
+            this.windDetected = true;
           }
         });
       });
 
-      if(this.deviceType === VirtualRainSensorDeviceType.Switch) {
+      if(this.deviceType === VirtualWindSensorDeviceType.Switch) {
         this.handleSwitchOnSet(this.handleSwitchOnGet());
       } else {
-        this.virtualRainSensorService.updateCharacteristic(hap.Characteristic.LeakDetected, this.handleLeakDetectedGet());
+        this.virtualWindSensorService.updateCharacteristic(hap.Characteristic.LeakDetected, this.handleLeakDetectedGet());
       }
     }
   }
@@ -193,7 +194,7 @@ class VirtualRainSensorPlugin implements AccessoryPlugin {
 
   pollNetatmoApi(): void {
     if(this.IsInCooldown) {
-      this.logging.debug('Cooldown detected. Skipping this rain detection cycle.');
+      this.logging.debug('Cooldown detected. Skipping this wind detection cycle.');
     } else {
       this.logging.debug('Polling the Netatmo API.');
       const now = new Date().getTime();
@@ -201,9 +202,9 @@ class VirtualRainSensorPlugin implements AccessoryPlugin {
       this.logging.debug(`Sliding window size in milliseconds: ${slidingWindowSizeInMillis}.`);
       const options = {
         device_id: this.netatmoStationId,
-        module_id: this.netatmoRainSensorId,
+        module_id: this.netatmoWindSensorId,
         scale: '30min',
-        type: ['rain'],
+        type: ['wind'],
         date_begin: Math.floor(new Date(now - slidingWindowSizeInMillis).getTime()/1000),
         optimize: true,
         real_time: true,
@@ -216,12 +217,12 @@ class VirtualRainSensorPlugin implements AccessoryPlugin {
   getServices(): Service[] {
     return [
       this.accessoryInformationService,
-      this.virtualRainSensorService,
+      this.virtualWindSensorService,
     ];
   }
 
   scheduleSwitchReset(): void {
-    if(this.deviceType === VirtualRainSensorDeviceType.Switch) {
+    if(this.deviceType === VirtualWindSensorDeviceType.Switch) {
       setTimeout(() => this.handleSwitchOnSet(false), 500);
     }
   }
@@ -236,11 +237,11 @@ class VirtualRainSensorPlugin implements AccessoryPlugin {
 
   handleSwitchOnGet(): boolean {
     if(this.IsInCooldown) {
-      this.logging.debug('Rain detected is false during cooldown.');
+      this.logging.debug('Wind detected is false during cooldown.');
       return false;
     } else {
-      if(this.rainDetected) {
-        this.logging.info('Rain detected!');
+      if(this.windDetected) {
+        this.logging.info('Wind detected!');
 
         if(this.cooldownIntervalInMinutes > 0) {
           const cooldownIntervalInMs = this.cooldownIntervalInMinutes * 60 * 1000;
@@ -254,7 +255,7 @@ class VirtualRainSensorPlugin implements AccessoryPlugin {
         this.scheduleSwitchReset();
         return true;
       } else {
-        this.logging.debug('No rain detected.');
+        this.logging.debug('No wind detected.');
         return false;
       }
     }
@@ -269,6 +270,6 @@ class VirtualRainSensorPlugin implements AccessoryPlugin {
       this.logging.debug('Turn switch off.');
     }
 
-    this.virtualRainSensorService.updateCharacteristic(hap.Characteristic.On, value);
+    this.virtualWindSensorService.updateCharacteristic(hap.Characteristic.On, value);
   }
 }
