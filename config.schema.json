@@ -1,5 +1,5 @@
 {
-  "pluginAlias": "homebridge-plugin-netatmo-rain-sensor",
+  "pluginAlias": "homebridge-plugin-netatmo-wind-sensor",
   "pluginType": "accessory",
   "singular": false,
   "schema": {
@@ -9,7 +9,7 @@
         "title": "Name",
         "type": "string",
         "required": true,
-        "default": "Homebridge Netatmo Rain Sensor"
+        "default": "Homebridge Netatmo Wind Sensor"
       },
       "deviceType": {
         "title": "Device Type",
@@ -45,6 +45,13 @@
         "type": "string",
         "required": true,
         "description": "Create this at https://dev.netatmo.com/"
+      },
+      "minimumSpeed": {
+        "title": "Minimum Speed trigger",
+        "type": "integer",
+        "required": true,
+        "default": 30,
+        "description": "Sets the minimum gust speed to trigger the sensor."
       },
       "pollingInterval": {
         "title": "Netatmo API polling interval",
