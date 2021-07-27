@@ -204,7 +204,7 @@ class VirtualWindSensorPlugin implements AccessoryPlugin {
         device_id: this.netatmoStationId,
         module_id: this.netatmoWindSensorId,
         scale: '30min',
-        type: ['wind'],
+        type: ['guststrength'],
         date_begin: Math.floor(new Date(now - slidingWindowSizeInMillis).getTime()/1000),
         optimize: true,
         real_time: true,
